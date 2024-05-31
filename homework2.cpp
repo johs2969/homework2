@@ -52,10 +52,11 @@ typedef struct {
     RAW_INST raw_inst; //binary 형태의 instruction 저장
     INSTRUCTION decoded_inst; //decoding된 instruction 저장
     uint32_t pc;
-    uint32_t alu_result;
-    uint32_t mem_data;
-    uint32_t forward;
+    int32_t alu_result;
+    int32_t mem_data;
     uint8_t valid;
+    uint8_t Frs1;
+    uint8_t Frs2;
     int imm;
 } PipelineRegister;
 
@@ -116,7 +117,7 @@ INSTRUCTION decode(RAW_INST target_instruction) {
 
 // 명령어 페치(fetch)함수: 주어진 프로그램(txt파일)으로부터 명령어를 읽어 들임
 RAW_INST fetch(uint32_t pc) {
-    char filename[] = "hw02_programA.txt"; //프로그램B를 수행하기 위해서는 문자열을 "hw02_programB.txt"로 변경
+    char filename[] = "hw02_programB.txt"; //프로그램B를 수행하기 위해서는 문자열을 "hw02_programB.txt"로 변경
     char buffer[100];
     FILE* file;
     char* token;
@@ -214,144 +215,237 @@ void print_instruction_info(INSTRUCTION inst) {
 }
 
 
+
 // 클록 사이클 실행 함수 - HW#02 수행을 위해 수정해야하는 함수, 해당 함수 외 "나머지 부분 수정할 필요 없음".
 int clock_cycle(int cycle) {
     printf("***  Current Cycle:%02d, PC:%02d  *** \n", cycle, pc);
+
+    int forwardA = 0, forwardB = 0;
+
 
     // Write Back (WB)
     if (MEM_WB.valid) {
         if (MEM_WB.decoded_inst.opcode == ADD || MEM_WB.decoded_inst.opcode == ADDI || MEM_WB.decoded_inst.opcode == LUI) {
             registers[MEM_WB.decoded_inst.rd] = MEM_WB.alu_result; //TODO: ADD와 같이, WB 단계에서 레지스터 파일 값을 변경해야 하는 명령어 타입에 대해    
-                                                                   // ALU 연산 값으로 목적 레지스터 파일 값 업데이트 수행
+            // ALU 연산 값으로 목적 레지스터 파일 값 업데이트 수행
         }
         else if (MEM_WB.decoded_inst.opcode == LW) {
             registers[MEM_WB.decoded_inst.rd] = MEM_WB.mem_data; //TODO-2: LW 연산에 적합한 동작 수행
-            }
-            printf("WB stage: ");
-            print_instruction_info(MEM_WB.decoded_inst);
         }
+        printf("WB stage: ");
+        print_instruction_info(MEM_WB.decoded_inst);
+    }
 
-        // Memory Access (MEM)
-        if (EX_MEM.valid) {
-            MEM_WB.decoded_inst = EX_MEM.decoded_inst;
-            MEM_WB.alu_result = EX_MEM.alu_result;
-            MEM_WB.pc = EX_MEM.pc;
-            MEM_WB.valid = 1;
 
-            if (EX_MEM.decoded_inst.opcode == LW) {
-                MEM_WB.mem_data = memory[EX_MEM.alu_result / 4]; //TODO. 메모리에서 읽어온 데이터를 MEM_WB 레지스터에 저장
+    // Memory Access (MEM)
+    if (EX_MEM.valid) {
+        MEM_WB.decoded_inst = EX_MEM.decoded_inst;
+        MEM_WB.alu_result = EX_MEM.alu_result;
+        MEM_WB.pc = EX_MEM.pc;
+        MEM_WB.valid = 1;
+
+        if (EX_MEM.decoded_inst.opcode == LW) {
+            MEM_WB.mem_data = memory[EX_MEM.alu_result / 4]; //TODO. 메모리에서 읽어온 데이터를 MEM_WB 레지스터에 저장
+        }
+        else if (EX_MEM.decoded_inst.opcode == SW) {
+            memory[EX_MEM.alu_result / 4] = registers[EX_MEM.decoded_inst.rs2]; //TODO. 레지스터에서 읽어온 데이터를 메모리의 목적 주소에 저장
+        }
+        else if (EX_MEM.decoded_inst.opcode == BEQ) {
+            if (EX_MEM.alu_result == 0) {
+                printf("branch performed!! Invalid instructions in the previous stages.\n");
+                pc = EX_MEM.pc + EX_MEM.decoded_inst.imm; // TODO. 프로그램 카운터 값 목적지 주소로 업데이트
+                IF_ID.valid = ID_EX.valid = EX_MEM.valid = 0; // TODO. Branch taken으로 인한, pipelining stage 업데이트
             }
-            else if (EX_MEM.decoded_inst.opcode == SW) {
-                memory[EX_MEM.alu_result / 4] = registers[EX_MEM.decoded_inst.rs2]; //TODO. 레지스터에서 읽어온 데이터를 메모리의 목적 주소에 저장
+        }
+        else if (EX_MEM.decoded_inst.opcode == BLT) {
+            if (EX_MEM.alu_result < 0) {
+                printf("branch performed!! Invalid instructions in the previous stages.\n");
+                pc = EX_MEM.pc + EX_MEM.decoded_inst.imm; // TODO. 프로그램 카운터 값 목적지 주소로 업데이트
+                IF_ID.valid = ID_EX.valid = EX_MEM.valid = 0; // TODO. Branch taken으로 인한, pipelining stage 업데이트
             }
-            else if (EX_MEM.decoded_inst.opcode == BEQ) {
-                if (EX_MEM.alu_result == 0) {
-                    printf("branch performed!! Invalid instructions in the previous stages.\n");
-                    pc = EX_MEM.pc + EX_MEM.decoded_inst.imm; // TODO. 프로그램 카운터 값 목적지 주소로 업데이트
-                    IF_ID.valid = ID_EX.valid = EX_MEM.valid = 0; // TODO. Branch taken으로 인한, pipelining stage 업데이트
-                }
-            }
-            else if (EX_MEM.decoded_inst.opcode == BLT) {
-                if (EX_MEM.alu_result < 0) {
-                    printf("branch performed!! Invalid instructions in the previous stages.\n");
-                    pc = EX_MEM.pc + EX_MEM.decoded_inst.imm; // TODO. 프로그램 카운터 값 목적지 주소로 업데이트
-                    IF_ID.valid = ID_EX.valid = EX_MEM.valid = 0; // TODO. Branch taken으로 인한, pipelining stage 업데이트
-                }
-            }
-            printf("MEM stage: ");
-            print_instruction_info(EX_MEM.decoded_inst);
-            //print_memory_values();
+        }
+        printf("MEM stage: ");
+        print_instruction_info(EX_MEM.decoded_inst);
+        //print_memory_values();
+    }
+    else {
+        MEM_WB.valid = 0;
+    }
+
+    // mux control signal A
+    if ((MEM_WB.decoded_inst.rd != 0) &&
+        (MEM_WB.decoded_inst.opcode == ADD || MEM_WB.decoded_inst.opcode == ADDI || MEM_WB.decoded_inst.opcode == LUI || MEM_WB.decoded_inst.opcode == LW) &&
+        (MEM_WB.decoded_inst.rd == ID_EX.decoded_inst.rs1))
+    {
+        forwardA = 01;
+
+        if (MEM_WB.decoded_inst.opcode == ADD || MEM_WB.decoded_inst.opcode == ADDI || MEM_WB.decoded_inst.opcode == LUI) {
+            ID_EX.Frs1 = MEM_WB.alu_result;
         }
         else {
-            MEM_WB.valid = 0;
+            ID_EX.Frs1 = MEM_WB.mem_data;
         }
 
-        // Execute (EX)
-        if (ID_EX.valid) {
-            EX_MEM.decoded_inst = ID_EX.decoded_inst;
-            EX_MEM.pc = ID_EX.pc;
-            EX_MEM.valid = 1;
-            //TODO. 주어진 명령어 종류에 따른 적합한 ALU 연산 수행.
-            //ADD, ADDI, LW, SW, BEQ, BLT, LUI
+    }
+    else if ((EX_MEM.decoded_inst.rd != 0) &&
+        (EX_MEM.decoded_inst.opcode == ADD || EX_MEM.decoded_inst.opcode == ADDI || EX_MEM.decoded_inst.opcode == LUI) &&
+        (EX_MEM.decoded_inst.rd == ID_EX.decoded_inst.rs1))
+    {
+        forwardA = 10;
+
+        ID_EX.Frs1 = EX_MEM.alu_result;
+
+    }
+
+    // mux control signal B
+    if ((MEM_WB.decoded_inst.rd != 0) &&
+        (MEM_WB.decoded_inst.opcode == ADD || MEM_WB.decoded_inst.opcode == ADDI || MEM_WB.decoded_inst.opcode == LUI || MEM_WB.decoded_inst.opcode == LW) &&
+        (MEM_WB.decoded_inst.rd == ID_EX.decoded_inst.rs2))
+    {
+        forwardB = 01;
+
+        if (MEM_WB.decoded_inst.opcode == ADD || MEM_WB.decoded_inst.opcode == ADDI || MEM_WB.decoded_inst.opcode == LUI) {
+            ID_EX.Frs2 = MEM_WB.alu_result;
+        }
+        else {
+            ID_EX.Frs2 = MEM_WB.mem_data;
+        }
+
+    }
+    else if ((EX_MEM.decoded_inst.rd != 0) &&
+        (EX_MEM.decoded_inst.opcode == ADD || EX_MEM.decoded_inst.opcode == ADDI || EX_MEM.decoded_inst.opcode == LUI || EX_MEM.decoded_inst.opcode == LW) &&
+        (EX_MEM.decoded_inst.rd == ID_EX.decoded_inst.rs2))
+    {
+        forwardB = 10;
+
+        ID_EX.Frs2 = EX_MEM.alu_result;
+
+    }
 
 
-            if (ID_EX.decoded_inst.opcode == ADD) {
-                EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + registers[ID_EX.decoded_inst.rs2]; // TODO. add
-                //
-            }
-            else if (ID_EX.decoded_inst.opcode == ADDI) {
+    // Execute (EX)
+    if (ID_EX.valid) {
+        EX_MEM.decoded_inst = ID_EX.decoded_inst;
+        EX_MEM.pc = ID_EX.pc;
+        EX_MEM.valid = 1;
+        //TODO. 주어진 명령어 종류에 따른 적합한 ALU 연산 수행.
+        //ADD, ADDI, LW, SW, BEQ, BLT, LUI
+
+
+        if (ID_EX.decoded_inst.opcode == ADD) {
+            EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + registers[ID_EX.decoded_inst.rs2]; // TODO. add
+            //
+        }
+        else if (ID_EX.decoded_inst.opcode == ADDI) {
+            if (forwardA == 0)
                 EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + ID_EX.decoded_inst.imm; // TODO. addi
-                //
-            }
-            else if (ID_EX.decoded_inst.opcode == LW) {
-                EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + ID_EX.decoded_inst.imm; // TODO. load
-            }
-            
-            else if (ID_EX.decoded_inst.opcode == SW) {
-                EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + ID_EX.decoded_inst.imm; // TODO. store
-                //
-            }
-            else if (ID_EX.decoded_inst.opcode == BEQ) {
+            else if (forwardA)
+                EX_MEM.alu_result = ID_EX.Frs1 + ID_EX.decoded_inst.imm;
+            //
+        }
+        else if (ID_EX.decoded_inst.opcode == LW) {
+            EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + ID_EX.decoded_inst.imm; // TODO. load
+        }
+
+        else if (ID_EX.decoded_inst.opcode == SW) {
+            EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] + ID_EX.decoded_inst.imm; // TODO. store
+            //
+        }
+        else if (ID_EX.decoded_inst.opcode == BEQ) {
+            if (forwardA == 0 && forwardB == 0)
                 EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] - registers[ID_EX.decoded_inst.rs2]; // TODO. beq
-                //
-            }
-            else if (ID_EX.decoded_inst.opcode == BLT) {  // blt - 아래는 예시 제공을 위한 완성된 코드입니다. 
+            else if (forwardA == 0 && forwardB != 0)
+                EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] - ID_EX.Frs2;
+            else if (forwardA != 0 && forwardB == 0)
+                EX_MEM.alu_result = ID_EX.Frs1 - registers[ID_EX.decoded_inst.rs2];
+            else
+                EX_MEM.alu_result = ID_EX.Frs1 - ID_EX.Frs2;
+            //
+        }
+        else if (ID_EX.decoded_inst.opcode == BLT) {  // blt - 아래는 예시 제공을 위한 완성된 코드입니다. 
+            if (forwardA == 0 && forwardB == 0)
                 EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] - registers[ID_EX.decoded_inst.rs2];
-            }
-            else if (ID_EX.decoded_inst.opcode == LUI) {  // lui - 아래는 예시 제공을 위한 완성된 코드입니다. 
-                EX_MEM.alu_result = (ID_EX.decoded_inst.imm << 12);
-            }
-
-
-            printf("EX stage: ");
-            print_instruction_info(ID_EX.decoded_inst);
+            else if (forwardA == 0 && forwardB != 0)
+                EX_MEM.alu_result = registers[ID_EX.decoded_inst.rs1] - ID_EX.Frs2;
+            else if (forwardA != 0 && forwardB == 0)
+                EX_MEM.alu_result = ID_EX.Frs1 - registers[ID_EX.decoded_inst.rs2];
+            else
+                EX_MEM.alu_result = ID_EX.Frs1 - ID_EX.Frs2;
+            //
         }
-        else {
-            EX_MEM.valid = 0;
-        }
-
-        // Instruction Decode / Register Fetch (ID)
-        if (IF_ID.valid) {
-            ID_EX.decoded_inst = decode(IF_ID.raw_inst);
-            ID_EX.pc = IF_ID.pc;
-            ID_EX.valid = 1;
-            printf("ID stage: ");
-            print_instruction_info(ID_EX.decoded_inst);
-        }
-        else {
-            ID_EX.valid = 0;
+        else if (ID_EX.decoded_inst.opcode == LUI) {  // lui - 아래는 예시 제공을 위한 완성된 코드입니다. 
+            EX_MEM.alu_result = (ID_EX.decoded_inst.imm << 12);
         }
 
+
+        printf("EX stage: ");
+        print_instruction_info(ID_EX.decoded_inst);
+    }
+    else {
+        EX_MEM.valid = 0;
+    }
+
+    // Instruction Decode / Register Fetch (ID)
+    if (IF_ID.valid) {
+
+        ID_EX.decoded_inst = decode(IF_ID.raw_inst);
+        ID_EX.pc = IF_ID.pc;
+        ID_EX.valid = 1;
+        printf("ID stage: ");
+        print_instruction_info(ID_EX.decoded_inst);
+    }
+    else {
+        ID_EX.valid = 0;
+    }
+
+
+
+    //Stall
+    if ((ID_EX.decoded_inst.opcode == LW) && (((ID_EX.decoded_inst.rd == decode(IF_ID.raw_inst).rs1)) || ((ID_EX.decoded_inst.rd == decode(IF_ID.raw_inst).rs2))))
+    {
+        ID_EX.decoded_inst.rs1 = 0;
+        ID_EX.decoded_inst.rs2 = 0;
+        ID_EX.decoded_inst.rd = 0;
+        ID_EX.decoded_inst.imm = 0;
+        ID_EX.decoded_inst.opcode = 0;
+        printf("IF stage: binary value of inst[%d]\n", pc / 4);
+
+    }
+    else {
         // Instruction Fetch (IF)
         IF_ID.raw_inst = fetch(pc); //Do fetch - implemented
         IF_ID.pc = pc;
         if (strcmp(IF_ID.raw_inst.inst, "nop") != 0) {
+
             IF_ID.valid = 1;
             printf("IF stage: binary value of inst[%d]\n", pc / 4);
             pc += 4; //update the program counter
+
         }
         else {  // there is no 
             IF_ID.valid = 0;
             printf("There is no more instruction to read.\n");
         }
 
-        print_register_values();    //print registers' value if it is not zero.
-        print_memory_values();      //print memory data if it is not zero.
-        printf("\n");
+    }
+    print_register_values();    //print registers' value if it is not zero.
+    print_memory_values();      //print memory data if it is not zero.
+    printf("\n");
 
-        //더 이상 수행할 명령어가 없고 모든 stage에서 아무런 동작도 하지 않는 경우, 프로그램을 종료함.
-        if (strcmp(IF_ID.raw_inst.inst, "nop") == 0 && !ID_EX.valid && !EX_MEM.valid && !MEM_WB.valid) {
-            return -1;
-        }
-        else
-            return 1;
+    //더 이상 수행할 명령어가 없고 모든 stage에서 아무런 동작도 하지 않는 경우, 프로그램을 종료함.
+    if (strcmp(IF_ID.raw_inst.inst, "nop") == 0 && !ID_EX.valid && !EX_MEM.valid && !MEM_WB.valid) {
+        return -1;
+    }
+    else
+        return 1;
 
 
 }
 
 
+
 int main() {
-    // 프로그램 A를 위한 초기화
+    /* 프로그램 A를 위한 초기화
     registers[2] = 4;
     registers[3] = 8;
     registers[5] = 16;
@@ -360,7 +454,7 @@ int main() {
     registers[9] = 9;
     memory[2] = 44;
     memory[9] = 40;
-  
+    */
     /// *** 프로그램 B를 사용할 때는 위의 초기화 부분을 전체 주석처리 하고 수행합니다. ***
 
     pc = 0;
