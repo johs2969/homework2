@@ -313,7 +313,7 @@ int clock_cycle(int cycle) {
 
     }
     else if ((EX_MEM.decoded_inst.rd != 0) &&
-        (EX_MEM.decoded_inst.opcode == ADD || EX_MEM.decoded_inst.opcode == ADDI || EX_MEM.decoded_inst.opcode == LUI || EX_MEM.decoded_inst.opcode == LW) &&
+        (EX_MEM.decoded_inst.opcode == ADD || EX_MEM.decoded_inst.opcode == ADDI || EX_MEM.decoded_inst.opcode == LUI ) &&
         (EX_MEM.decoded_inst.rd == ID_EX.decoded_inst.rs2))
     {
         forwardB = 10;
